@@ -197,6 +197,32 @@ impl AgentControl {
         .await
     }
 
+    async fn send_v2_op_after_capacity_check(
+        &self,
+        agent_id: ThreadId,
+        state: &Arc<ThreadManagerState>,
+        op: Op,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+    ) -> CodexResult<String> {
+        let mut submission_id = None;
+        let send_result = state
+            .send_op_with_registration(agent_id, op, parent_turn_id, root_turn_id, |id| {
+                self.begin_v2_submission(agent_id, id);
+                submission_id = Some(id.to_string());
+            })
+            .await;
+        let result = self
+            .handle_thread_request_result(agent_id, state, send_result)
+            .await;
+        if result.is_err()
+            && let Some(submission_id) = submission_id
+        {
+            self.finish_v2_submission(agent_id, &submission_id);
+        }
+        result
+    }
+
     pub(crate) async fn send_inter_agent_communication(
         &self,
         agent_id: ThreadId,
@@ -264,6 +290,41 @@ impl AgentControl {
                         root_turn_id,
                     )
                     .await,
+            )
+            .await;
+        if let (Some(communication), Ok(communication_id)) =
+            (communication_for_log, result.as_ref())
+        {
+            crate::agent_communication::emit_agent_communication_send(
+                communication_id,
+                &context,
+                &communication,
+                agent_id,
+            );
+        }
+        result
+    }
+
+    async fn submit_v2_inter_agent_communication(
+        &self,
+        agent_id: ThreadId,
+        state: &Arc<ThreadManagerState>,
+        communication: InterAgentCommunication,
+        context: AgentCommunicationContext,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+    ) -> CodexResult<String> {
+        let communication_for_log =
+            crate::agent_communication::logging_enabled().then(|| communication.clone());
+        let parent_turn_id = parent_turn_id.filter(|_| communication.trigger_turn);
+        let root_turn_id = root_turn_id.filter(|_| communication.trigger_turn);
+        let result = self
+            .send_v2_op_after_capacity_check(
+                agent_id,
+                state,
+                Op::InterAgentCommunication { communication },
+                parent_turn_id,
+                root_turn_id,
             )
             .await;
         if let (Some(communication), Ok(communication_id)) =

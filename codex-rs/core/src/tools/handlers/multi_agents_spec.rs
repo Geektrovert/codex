@@ -357,6 +357,27 @@ pub fn create_interrupt_agent_tool_v2() -> ToolSpec {
     })
 }
 
+pub fn create_release_agent_tool_v2() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "target".to_string(),
+        JsonSchema::string(Some(
+            "Relative or canonical task name to release (from spawn_agent).".to_string(),
+        )),
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "release_agent".to_string(),
+        description: "Unload a terminal agent's session and subprocesses when no immediate follow-up is expected. The agent must be completed or interrupted with no pending messages. Its task identity and persisted history remain available, and a later followup_task will reload it. Release terminal agents promptly to avoid retaining their MCP servers and memory."
+            .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(properties, Some(vec!["target".to_string()]), Some(false.into())),
+        output_schema: Some(agent_previous_status_output_schema(
+            "The agent status observed before its resident session was released.",
+        )),
+    })
+}
+
 fn agent_status_output_schema() -> Value {
     json!({
         "oneOf": [

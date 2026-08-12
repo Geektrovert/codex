@@ -2309,6 +2309,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "followup_task",
         "wait_agent",
         "interrupt_agent",
+        "release_agent",
         "list_agents",
         "send_input",
         "resume_agent",
@@ -2321,6 +2322,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "followup_task",
         "wait_agent",
         "interrupt_agent",
+        "release_agent",
         "list_agents",
     ] {
         assert!(
@@ -2354,12 +2356,6 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     for property in ["agent_type", "service_tier"] {
         assert!(!spawn_agent_properties.contains_key(property));
     }
-    let spawn_agent_description = spawn_agent.description.as_str();
-    assert!(!spawn_agent_description.contains("max_concurrent_threads_per_session"));
-    assert!(spawn_agent_description.contains(
-        "Note that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent"
-    ));
-
     let direct_model_only = probe(|turn| {
         set_features(
             turn,

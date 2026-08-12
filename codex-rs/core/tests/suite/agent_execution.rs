@@ -330,3 +330,92 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools() -> Resu
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v2_release_unloads_agent_and_followup_reloads_same_identity() -> Result<()> {
+    const RELEASE_PROMPT: &str = "release the lifecycle worker";
+    const FOLLOWUP_PROMPT: &str = "continue the released lifecycle worker";
+    const FOLLOWUP_TASK: &str = "finish the follow-up lifecycle task";
+
+    let server = start_mock_server().await;
+    mount_root_collaboration_call(
+        &server,
+        FIRST_PROMPT,
+        "spawn-lifecycle-call",
+        "spawn_agent",
+        json!({ "message": FIRST_TASK, "task_name": "lifecycle", "fork_turns": "none" }),
+    )
+    .await;
+    let initial_worker = mount_completed_worker(&server, FIRST_TASK, "spawn-lifecycle-call").await;
+    mount_root_collaboration_call(
+        &server,
+        RELEASE_PROMPT,
+        "release-lifecycle-call",
+        "release_agent",
+        json!({ "target": "lifecycle" }),
+    )
+    .await;
+    mount_root_collaboration_call(
+        &server,
+        FOLLOWUP_PROMPT,
+        "followup-lifecycle-call",
+        "followup_task",
+        json!({ "target": "lifecycle", "message": FOLLOWUP_TASK }),
+    )
+    .await;
+    let followup_worker =
+        mount_completed_worker(&server, FOLLOWUP_TASK, "followup-lifecycle-call").await;
+
+    let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::Collab)
+            .expect("test config should allow collaboration");
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("test config should allow multi-agent v2");
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+    let mut created_threads = test.thread_manager.subscribe_thread_created();
+
+    test.submit_text_turn(FIRST_PROMPT).await?;
+    let child_thread_id = created_threads.recv().await?;
+    let child = test.thread_manager.get_thread(child_thread_id).await?;
+    wait_for_event(child.as_ref(), |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert!(initial_worker.requests().iter().any(|request| {
+        request.body_json()["client_metadata"]["thread_id"] == json!(child_thread_id)
+            && request.body_contains_text(FIRST_TASK)
+    }));
+
+    test.submit_text_turn(RELEASE_PROMPT).await?;
+    assert!(
+        test.thread_manager
+            .get_thread(child_thread_id)
+            .await
+            .is_err()
+    );
+    assert!(
+        test.thread_manager
+            .get_thread(test.session_configured.thread_id)
+            .await
+            .is_ok()
+    );
+
+    test.submit_text_turn(FOLLOWUP_PROMPT).await?;
+    let reloaded_child = test.thread_manager.get_thread(child_thread_id).await?;
+    wait_for_event(reloaded_child.as_ref(), |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert!(followup_worker.requests().iter().any(|request| {
+        request.body_json()["client_metadata"]["thread_id"] == json!(child_thread_id)
+            && request.body_contains_text(FOLLOWUP_TASK)
+            && request.body_contains_text("worker completed")
+    }));
+
+    Ok(())
+}

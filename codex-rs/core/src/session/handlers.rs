@@ -101,6 +101,9 @@ pub async fn user_input_or_turn(
     .await;
     sess.pending_user_message_admissions
         .complete(&sub_id, admission);
+    sess.services
+        .agent_control
+        .finish_v2_submission(sess.thread_id(), &sub_id);
 }
 
 pub async fn update_thread_settings(
@@ -326,9 +329,12 @@ pub async fn inter_agent_communication(
         .await;
     crate::agent_communication::emit_agent_communication_receive(&sub_id);
     if trigger_turn || sess.has_outstanding_durable_sleep() {
-        sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
+        sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id.clone())
             .await;
     }
+    sess.services
+        .agent_control
+        .finish_v2_submission(sess.thread_id(), &sub_id);
 }
 
 pub async fn run_user_shell_command(sess: &Arc<Session>, sub_id: String, command: String) {

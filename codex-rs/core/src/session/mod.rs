@@ -843,6 +843,21 @@ impl SessionIo {
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
+        self.submit_with_trace_and_registration(op, trace, parent_turn_id, root_turn_id, |_| {})
+            .await
+    }
+
+    pub(crate) async fn submit_with_trace_and_registration<F>(
+        &self,
+        op: Op,
+        trace: Option<W3cTraceContext>,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+        register: F,
+    ) -> CodexResult<String>
+    where
+        F: FnOnce(&str),
+    {
         let id = new_submission_id();
         let sub = Submission {
             id: id.clone(),
@@ -852,6 +867,7 @@ impl SessionIo {
             parent_turn_id,
             root_turn_id,
         };
+        register(&id);
         self.submit_with_id(sub).await?;
         Ok(id)
     }

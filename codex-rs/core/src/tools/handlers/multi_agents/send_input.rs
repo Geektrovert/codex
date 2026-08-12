@@ -48,18 +48,15 @@ impl Handler {
             .services
             .agent_control
             .get_agent_metadata(receiver_thread_id);
-        if receiver_agent.is_some() {
+        let resume_config = if receiver_agent.is_some() {
             let resume_config =
                 build_agent_resume_config(turn.as_ref(), step_context.environments.primary())?;
-            session
-                .services
-                .agent_control
-                .ensure_v2_agent_loaded(resume_config, receiver_thread_id)
-                .await
-                .map_err(|err| collab_agent_error(receiver_thread_id, err))?;
-        }
+            Some(resume_config)
+        } else {
+            None
+        };
         let receiver_agent = receiver_agent.unwrap_or_default();
-        if args.interrupt {
+        if args.interrupt && resume_config.is_none() {
             session
                 .services
                 .agent_control
@@ -85,15 +82,32 @@ impl Handler {
             )
             .await;
         let agent_control = session.services.agent_control.clone();
-        let result = agent_control
-            .send_input(
-                receiver_thread_id,
-                input_items,
-                Some(turn.sub_id.clone()),
-                turn.turn_metadata_state.root_turn_id(),
-            )
-            .await
-            .map_err(|err| collab_agent_error(receiver_thread_id, err));
+        let root_turn_id = turn.turn_metadata_state.root_turn_id();
+        let result = match resume_config {
+            Some(resume_config) => {
+                agent_control
+                    .send_input_to_v2(
+                        resume_config,
+                        receiver_thread_id,
+                        input_items,
+                        Some(turn.sub_id.clone()),
+                        root_turn_id,
+                        args.interrupt,
+                    )
+                    .await
+            }
+            None => {
+                agent_control
+                    .send_input(
+                        receiver_thread_id,
+                        input_items,
+                        Some(turn.sub_id.clone()),
+                        root_turn_id,
+                    )
+                    .await
+            }
+        }
+        .map_err(|err| collab_agent_error(receiver_thread_id, err));
         let status = session
             .services
             .agent_control

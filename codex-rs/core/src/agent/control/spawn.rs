@@ -246,7 +246,72 @@ impl AgentControl {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn ensure_v2_agent_loaded(
+        &self,
+        config: Config,
+        thread_id: ThreadId,
+    ) -> CodexResult<()> {
+        let _lifecycle_guard = self.lock_v2_lifecycle(thread_id).await;
+        self.ensure_v2_agent_loaded_while_locked(config, thread_id)
+            .await
+    }
+
+    pub(crate) async fn send_inter_agent_communication_to_v2(
+        &self,
+        config: Config,
+        thread_id: ThreadId,
+        communication: InterAgentCommunication,
+        context: AgentCommunicationContext,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+    ) -> CodexResult<String> {
+        let _lifecycle_guard = self.lock_v2_lifecycle(thread_id).await;
+        self.ensure_v2_agent_loaded_while_locked(config, thread_id)
+            .await?;
+        let state = self.upgrade()?;
+        self.ensure_execution_capacity_for_turn_start(thread_id, communication.trigger_turn)
+            .await?;
+        self.submit_v2_inter_agent_communication(
+            thread_id,
+            &state,
+            communication,
+            context,
+            parent_turn_id,
+            root_turn_id,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_input_to_v2(
+        &self,
+        config: Config,
+        thread_id: ThreadId,
+        input: Vec<UserInput>,
+        parent_turn_id: Option<String>,
+        root_turn_id: Option<String>,
+        interrupt_first: bool,
+    ) -> CodexResult<String> {
+        let _lifecycle_guard = self.lock_v2_lifecycle(thread_id).await;
+        self.ensure_v2_agent_loaded_while_locked(config, thread_id)
+            .await?;
+        if interrupt_first {
+            self.interrupt_agent(thread_id).await?;
+        }
+        let state = self.upgrade()?;
+        self.ensure_execution_capacity_for_turn_start(thread_id, /*starts_turn*/ true)
+            .await?;
+        self.send_v2_op_after_capacity_check(
+            thread_id,
+            &state,
+            input.into(),
+            parent_turn_id,
+            root_turn_id,
+        )
+        .await
+    }
+
+    async fn ensure_v2_agent_loaded_while_locked(
         &self,
         mut config: Config,
         thread_id: ThreadId,
